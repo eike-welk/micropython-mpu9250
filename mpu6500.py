@@ -24,8 +24,6 @@
 Python I2C driver for MPU6500 6-axis motion tracking device
 """
 
-__version__ = "0.1.0-a"
-
 # pylint: disable=import-error
 import struct
 import time
@@ -95,7 +93,7 @@ class MPU6500:
     """Class which provides interface to MPU6500 6-axis motion tracking device."""
     def __init__(
         self, i2c_interface=None, busnum=1, address=0x68,
-        accel_senitivity=ACCEL_FS_SEL_2G, gyro_sensitivity=GYRO_FS_SEL_250DPS,
+        accel_sensitivity=ACCEL_FS_SEL_2G, gyro_sensitivity=GYRO_FS_SEL_250DPS,
         accel_unit_factor=ACCEL_UNIT_M_S2, gyro_unit_factor=GYRO_UNIT_RAD_S,
         gyro_offset=(0, 0, 0)
     ):
@@ -113,7 +111,7 @@ class MPU6500:
         if 0x71 != self.read_whoami():
             raise RuntimeError("MPU6500 not found on I2C bus.")
 
-        self._accel_sens_f = self._compute_accel_sens_f(accel_senitivity)
+        self._accel_sens_f = self._compute_accel_sens_f(accel_sensitivity)
         self._gyro_sens_f = self._compute_gyro_sens_f(gyro_sensitivity)
         self._accel_unit_f = accel_unit_factor
         self._gyro_unit_f = gyro_unit_factor
@@ -124,6 +122,20 @@ class MPU6500:
         char &= ~_I2C_BYPASS_MASK # clear I2C bits
         char |= _I2C_BYPASS_EN
         self._write_register_char(_INT_PIN_CFG, char)
+    
+    def read_acceleration_raw(self):
+        """Read the raw acceleration values from the sensor."""
+        return self._read_register_three_shorts(_ACCEL_XOUT_H)
+
+    def compute_acceleration(self, xyz_raw):
+        """
+        Compute calibrated and scaled acceleration values from raw 
+        sensor values.
+        """
+        so = self._accel_sens_f
+        sf = self._accel_unit_f
+
+        return tuple([value / so * sf for value in xyz_raw])
 
     def read_acceleration(self):
         """
@@ -134,11 +146,29 @@ class MPU6500:
         constructor is provided with the parameter 
         `accel_unit_factor=ACCEL_UNIT_G`.
         """
-        so = self._accel_sens_f
-        sf = self._accel_unit_f
+        xyz_raw = self.read_acceleration_raw()
+        return self.compute_acceleration(xyz_raw)
 
-        xyz_raw = self._read_register_three_shorts(_ACCEL_XOUT_H)
-        return tuple([value / so * sf for value in xyz_raw])
+    def read_gyro_raw(self):
+        """Read the raw angular velocity values from the sensor."""
+        return self._read_register_three_shorts(_GYRO_XOUT_H)
+
+    def compute_gyro(self, xyz_raw):
+        """
+        Compute calibrated and scaled angular velocity values from raw 
+        sensor values.
+        """
+        so = self._gyro_sens_f
+        sf = self._gyro_unit_f
+        ox, oy, oz = self._gyro_offset
+
+        xyz = [value / so * sf for value in xyz_raw]
+
+        xyz[0] -= ox
+        xyz[1] -= oy
+        xyz[2] -= oz
+
+        return tuple(xyz)
 
     def read_gyro(self):
         """
@@ -149,18 +179,8 @@ class MPU6500:
         constructor is provided with the parameter 
         `gyro_unit_factor=GYRO_UNIT_DEG_S`.
         """
-        so = self._gyro_sens_f
-        sf = self._gyro_unit_f
-        ox, oy, oz = self._gyro_offset
-
-        xyz_raw = self._read_register_three_shorts(_GYRO_XOUT_H)
-        xyz = [value / so * sf for value in xyz_raw]
-
-        xyz[0] -= ox
-        xyz[1] -= oy
-        xyz[2] -= oz
-
-        return tuple(xyz)
+        xyz_raw = self.read_acceleration_raw()
+        return self.compute_acceleration(xyz_raw)
 
     def read_temperature(self):
         """

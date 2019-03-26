@@ -26,8 +26,6 @@
 Python I2C driver for AK8963 magnetometer
 """
 
-__version__ = "0.1.0-a"
-
 # pylint: disable=import-error
 import struct
 import time
@@ -106,14 +104,18 @@ class AK8963:
             self._so = _SO_16BIT
         else:
             self._so = _SO_14BIT
-
-    def read_magnetic(self):
-        """
-        X, Y, Z axis micro-Tesla (uT) as floats.
-        """
-        xyz = list(self._read_register_three_shorts(_HXL))
+    
+    def read_magnetic_raw(self):
+        """Read the raw magnetometer readings from the sensor."""
+        xyz_raw = list(self._read_register_three_shorts(_HXL))
         self._read_register_char(_ST2) # Enable updating readings again
+        return xyz_raw
 
+    def compute_magnetic(self, xyz):
+        """
+        Compute calibrated and scaled magnetic field strength values from raw 
+        sensor values.
+        """
         # Apply factory axial sensitivy adjustments
         xyz[0] *= self._adjustment[0]
         xyz[1] *= self._adjustment[1]
@@ -136,6 +138,13 @@ class AK8963:
         xyz[2] *= self._scale[2]
 
         return tuple(xyz)
+
+    def read_magnetic(self):
+        """
+        X, Y, Z axis micro-Tesla (uT) as floats.
+        """
+        xyz_raw = self.read_magnetic_raw()
+        return self.compute_magnetic(xyz_raw)
 
     def read_whoami(self):
         """ Value of the whoami register. """
