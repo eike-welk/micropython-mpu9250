@@ -9,3 +9,5 @@ dist/
 # Vim
 *.swp
 
+# Mypy - Static type checker
+.mypy_cache/
