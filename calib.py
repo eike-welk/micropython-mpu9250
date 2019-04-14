@@ -1,4 +1,4 @@
-# A calibation library for the various sensors of a IMU.
+# A calibration library for the various sensors of a IMU.
 
 import time
 from collections import namedtuple
@@ -106,7 +106,7 @@ class CalibratorStill:
             return (    all(rot_std * 2 < self.calib_rot_max)
                     and all(acc_std * 2 < self.calib_acc_max))
 
-    def measure_1(self, gyro_is_calibrated: bool):
+    def measure_1(self, gyro_is_calibrated: bool) -> MeasData:
         """
         Take measurement values from one orientation of the device.
 
@@ -115,7 +115,7 @@ class CalibratorStill:
         Return the average measurement values.
         """
         # Storage for the accumulated sensor values.
-        # Initialized to lenght 0 along the measurement axis.
+        # Initialized to length 0 along the measurement axis.
         tim_all = np.zeros((0,))
         acc_raw_all = np.zeros((0, 3))
         rot_raw_all = np.zeros((0, 3))
@@ -143,7 +143,7 @@ class CalibratorStill:
                 logger.debug('Motion: discarding measured data.')
 
             # Enough data has been collected 
-            if len(tim_all) > self.read_total_samples:
+            if len(tim_all) >= self.read_total_samples:
                 logger.debug('Enough data has been collected.')
                 # Data quality: Was there no motion during the whole measurement?
                 if self.is_no_motion(acc_raw_all, rot_raw_all, 
@@ -163,7 +163,7 @@ class CalibratorStill:
             # Get the new sensor values
             tim, acc_raw, rot_raw, mag_raw = res.get()
         else:
-            # Not enough data was collected. The device was moved in too many times.
+            # Not enough data was collected. The device was moved too many times.
             return None
 
         # Return only the mean values of all measurements.
@@ -179,9 +179,19 @@ class CalibratorStill:
 
     def run(self):
         # Calibrate the gyro
-        self.measure_1(gyro_is_calibrated=False)
+        vals = self.measure_1(gyro_is_calibrated=False)
+        print('gyro:', self.gyro.compute_gyro(vals.rot))
+        print('accl:', self.accl.compute_acceleration(vals.acc))
 
-    # Concepts for data aquisition and evaluation
+        gyro_offset = self.gyro.compute_gyro(vals.rot)
+        self.gyro._gyro_calib_offs = -gyro_offset / self.gyro._gyro_unit_fact
+
+        # Test the calibration
+        vals = self.measure_1(gyro_is_calibrated=True)
+        print('gyro:', self.gyro.compute_gyro(vals.rot))
+        print('accl:', self.accl.compute_acceleration(vals.acc))
+
+    # Concepts for data acquisition and evaluation
 
     # Take some measurements to estimate the noise
     # and to calibrate the gyroscope
@@ -201,8 +211,6 @@ class CalibratorStill:
         # calibration parameters can be computed.
 
         # multiprocessing.pool.Pool
-
-        pass
 
     def write_text(self, text: str):
         self.communicate(MsgCalib(text, None))

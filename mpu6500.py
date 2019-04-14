@@ -27,7 +27,11 @@ Python I2C driver for MPU6500 6-axis motion tracking device
 # pylint: disable=import-error
 import struct
 import time
+
+import numpy as np
+
 import Adafruit_GPIO.I2C
+
 # pylint: enable=import-error
 
 # Internal registers
@@ -95,7 +99,6 @@ class MPU6500:
         self, i2c_interface=None, busnum=1, address=0x68,
         accel_sensitivity=ACCEL_FS_SEL_2G, gyro_sensitivity=GYRO_FS_SEL_250DPS,
         accel_unit_factor=ACCEL_UNIT_M_S2, gyro_unit_factor=GYRO_UNIT_RAD_S,
-        gyro_offset=(0, 0, 0)
     ):
         # Configure I2C connection
         if i2c_interface is None:
@@ -111,11 +114,13 @@ class MPU6500:
         if 0x71 != self.read_whoami():
             raise RuntimeError("MPU6500 not found on I2C bus.")
 
-        self._accel_sens_f = self._compute_accel_sens_f(accel_sensitivity)
-        self._gyro_sens_f = self._compute_gyro_sens_f(gyro_sensitivity)
+        self._accel_sens_f = self._config_accel_sensitivity(accel_sensitivity)
         self._accel_unit_f = accel_unit_factor
-        self._gyro_unit_f = gyro_unit_factor
-        self._gyro_offset = gyro_offset
+
+        self._gyro_sens_fact = self._config_gyro_sensitivity(gyro_sensitivity)
+        self._gyro_unit_fact = gyro_unit_factor
+        self._gyro_calib_fact = np.ones((3,))
+        self._gyro_calib_offs = np.zeros((3,))
 
         # Enable I2C bypass to access for MPU9250 magnetometer access.
         char = self._read_register_char(_INT_PIN_CFG)
@@ -151,24 +156,27 @@ class MPU6500:
 
     def read_gyro_raw(self):
         """Read the raw angular velocity values from the sensor."""
-        return self._read_register_three_shorts(_GYRO_XOUT_H)
+        return np.array(self._read_register_three_shorts(_GYRO_XOUT_H),
+                        dtype=np.float64)
 
     def compute_gyro(self, xyz_raw):
         """
         Compute calibrated and scaled angular velocity values from raw 
         sensor values.
+
+        Uses a linear transformation: 
+            `x = f * x_raw + o`
+
+        With:
+            f = unit_factor * calibration_factor * sensitivity_factor
+            o = unit_factor * calibration_offset
+
+        The unit_factor can be changed at any time, it is independent of 
+        the calibration or sensitivity. 
         """
-        so = self._gyro_sens_f
-        sf = self._gyro_unit_f
-        ox, oy, oz = self._gyro_offset
-
-        xyz = [value / so * sf for value in xyz_raw]
-
-        xyz[0] -= ox
-        xyz[1] -= oy
-        xyz[2] -= oz
-
-        return tuple(xyz)
+        f = self._gyro_unit_fact * self._gyro_calib_fact * self._gyro_sens_fact
+        o = self._gyro_unit_fact * self._gyro_calib_offs
+        return f * xyz_raw + o
 
     def read_gyro(self):
         """
@@ -193,21 +201,21 @@ class MPU6500:
         """ Value of the whoami register. """
         return self._read_register_char(_WHO_AM_I)
 
-    def calibrate_gyro(self, count=256, delay=0):
-        ox, oy, oz = (0.0, 0.0, 0.0)
-        self._gyro_offset = (0.0, 0.0, 0.0)
-        n = float(count)
+    # def calibrate_gyro(self, count=256, delay=0):
+    #     ox, oy, oz = (0.0, 0.0, 0.0)
+    #     self._gyro_offset = (0.0, 0.0, 0.0)
+    #     n = float(count)
 
-        while count:
-            time.sleep(delay/1000)
-            gx, gy, gz = self.read_gyro()
-            ox += gx
-            oy += gy
-            oz += gz
-            count -= 1
+    #     while count:
+    #         time.sleep(delay/1000)
+    #         gx, gy, gz = self.read_gyro()
+    #         ox += gx
+    #         oy += gy
+    #         oz += gz
+    #         count -= 1
 
-        self._gyro_offset = (ox / n, oy / n, oz / n)
-        return self._gyro_offset
+    #     self._gyro_offset = (ox / n, oy / n, oz / n)
+    #     return self._gyro_offset
 
     def _read_register_short(self, register):
         buf = self.i2c.read_i2c_block_data(self.address, register, 2)
@@ -227,7 +235,7 @@ class MPU6500:
     def _write_register_char(self, register, value):
         self.i2c.write_byte_data(self.address, register, value)
 
-    def _compute_accel_sens_f(self, value):
+    def _config_accel_sensitivity(self, value):
         self._write_register_char(_ACCEL_CONFIG, value)
 
         # Return the sensitivity divider
@@ -240,18 +248,18 @@ class MPU6500:
         elif ACCEL_FS_SEL_16G == value:
             return _ACCEL_SO_16G
 
-    def _compute_gyro_sens_f(self, value):
+    def _config_gyro_sensitivity(self, value):
         self._write_register_char(_GYRO_CONFIG, value)
 
         # Return the sensitivity divider
         if GYRO_FS_SEL_250DPS == value:
-            return _GYRO_SO_250DPS
+            return 1.0 / _GYRO_SO_250DPS
         elif GYRO_FS_SEL_500DPS == value:
-            return _GYRO_SO_500DPS
+            return 1.0 / _GYRO_SO_500DPS
         elif GYRO_FS_SEL_1000DPS == value:
-            return _GYRO_SO_1000DPS
+            return 1.0 / _GYRO_SO_1000DPS
         elif GYRO_FS_SEL_2000DPS == value:
-            return _GYRO_SO_2000DPS
+            return 1.0 / _GYRO_SO_2000DPS
 
     def __enter__(self):
         return self
