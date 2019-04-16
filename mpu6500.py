@@ -114,8 +114,10 @@ class MPU6500:
         if 0x71 != self.read_whoami():
             raise RuntimeError("MPU6500 not found on I2C bus.")
 
-        self._accel_sens_f = self._config_accel_sensitivity(accel_sensitivity)
-        self._accel_unit_f = accel_unit_factor
+        self._accel_sens_fact = self._config_accel_sensitivity(accel_sensitivity)
+        self._accel_unit_fact = accel_unit_factor
+        self._accel_calib_fact = np.ones((3,))
+        self._accel_calib_offs = np.zeros((3,))
 
         self._gyro_sens_fact = self._config_gyro_sensitivity(gyro_sensitivity)
         self._gyro_unit_fact = gyro_unit_factor
@@ -136,11 +138,20 @@ class MPU6500:
         """
         Compute calibrated and scaled acceleration values from raw 
         sensor values.
-        """
-        so = self._accel_sens_f
-        sf = self._accel_unit_f
 
-        return tuple([value / so * sf for value in xyz_raw])
+        Uses a linear transformation: 
+            `x = f * x_raw + o`
+
+        With:
+            f = unit_factor * calibration_factor * sensitivity_factor
+            o = unit_factor * calibration_offset
+
+        The unit_factor can be changed at any time, it is independent of 
+        the calibration or sensitivity. 
+        """
+        f = self._accel_unit_fact * self._accel_calib_fact * self._accel_sens_fact
+        o = self._accel_unit_fact * self._accel_calib_offs
+        return f * xyz_raw + o
 
     def read_acceleration(self):
         """
@@ -236,22 +247,24 @@ class MPU6500:
         self.i2c.write_byte_data(self.address, register, value)
 
     def _config_accel_sensitivity(self, value):
+        # Set the sensor sensitivity
         self._write_register_char(_ACCEL_CONFIG, value)
 
-        # Return the sensitivity divider
+        # Return the sensitivity factor.
         if ACCEL_FS_SEL_2G == value:
-            return _ACCEL_SO_2G
+            return 1.0 / _ACCEL_SO_2G
         elif ACCEL_FS_SEL_4G == value:
-            return _ACCEL_SO_4G
+            return 1.0 / _ACCEL_SO_4G
         elif ACCEL_FS_SEL_8G == value:
-            return _ACCEL_SO_8G
+            return 1.0 / _ACCEL_SO_8G
         elif ACCEL_FS_SEL_16G == value:
-            return _ACCEL_SO_16G
+            return 1.0 / _ACCEL_SO_16G
 
     def _config_gyro_sensitivity(self, value):
+        # Set the sensor sensitivity
         self._write_register_char(_GYRO_CONFIG, value)
 
-        # Return the sensitivity divider
+        # Return the sensitivity factor.
         if GYRO_FS_SEL_250DPS == value:
             return 1.0 / _GYRO_SO_250DPS
         elif GYRO_FS_SEL_500DPS == value:

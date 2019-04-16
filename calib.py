@@ -53,8 +53,8 @@ class CalibratorStill:
         self.read_n_samples = 20
         self.read_interval = 1.0 / 20        # 1 / 20 Hz
 
-        self.calib_rot_max = pi / 180 * 0.3  # 0.1 deg / s
-        self.calib_acc_max = 0.2             # 1 cm / s / s
+        self.calib_rot_max = pi / 180 * 0.3  # 0.3 deg / s
+        self.calib_acc_max = 0.1             # 10 cm / s / s
 
     def read_sensor_data(self) -> Tuple[np.array, np.array, np.array, np.array]:
         """
